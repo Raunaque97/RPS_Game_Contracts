@@ -36,15 +36,7 @@ contract KeepersConsumer is KeeperCompatibleInterface {
      */
     function checkUpkeep(
         bytes memory /* checkData */
-    )
-        public
-        view
-        override
-        returns (
-            bool upkeepNeeded,
-            bytes memory /* performData */
-        )
-    {
+    ) public view override returns (bool upkeepNeeded, bytes memory /* performData */) {
         upkeepNeeded = (block.timestamp - lastTimeStamp) > interval;
         // We don't use the checkData in this example. The checkData is defined when the Upkeep was registered.
     }
@@ -52,9 +44,7 @@ contract KeepersConsumer is KeeperCompatibleInterface {
     /**
      * @notice Performs the work on the contract, if instructed by :checkUpkeep():
      */
-    function performUpkeep(
-        bytes calldata /* performData */
-    ) external override {
+    function performUpkeep(bytes calldata /* performData */) external override {
         // add some verification
         (bool upkeepNeeded, ) = checkUpkeep("");
         require(upkeepNeeded, "Time interval not met");

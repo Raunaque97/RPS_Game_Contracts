@@ -1,12 +1,14 @@
 const { assert } = require("chai")
 const KeepersConsumer = artifacts.require("KeepersConsumer")
-const web3 = require("web3")
 const truffleAssert = require("truffle-assertions")
 
 contract("KeepersConsumer", function () {
     let keepersConsumer
     beforeEach(async () => {
-        keepersConsumer = await KeepersConsumer.deployed()
+        let accounts = web3.eth.accounts.create(["x0x"]) //await web3.eth.getAccounts()
+        keepersConsumer = await KeepersConsumer.deployed({
+            from: accounts.address,
+        })
     })
 
     it("should be able to call checkUpkeep", async () => {
