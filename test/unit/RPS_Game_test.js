@@ -1,6 +1,7 @@
 const { assert } = require("chai")
 const RPS_Game = artifacts.require("RPS_Game")
-const SecurityVault = artifacts.require("SecurityVault")
+const GameWallet = artifacts.require("GameWallet")
+const TestToken = artifacts.require("TestToken")
 const InitVerifier = artifacts.require("InitVerifier")
 const MoveAVerifier = artifacts.require("MoveAVerifier")
 const MoveBVerifier = artifacts.require("MoveBVerifier")
@@ -12,7 +13,7 @@ const truffleAssert = require("truffle-assertions")
 
 contract("RPS_Game", function () {
     let accounts, player0, player1, deployer
-    let rpsGame, securityVault
+    let rpsGame, gameWallet
     beforeEach(async () => {
         accounts = await web3.eth.getAccounts()
         deployer = accounts[0]
@@ -39,43 +40,36 @@ contract("RPS_Game", function () {
         // console.log("player0: " + player0.address)
         // console.log("player1: " + player1.address)
 
-        // deploy vault
-        securityVault = await SecurityVault.new(
-            // min deposit 1 ether
-            web3.utils.toWei("1", "ether"),
-            { from: deployer }
-        )
-        // deploy Game
-        rpsGame = await RPS_Game.new(securityVault.address, { from: deployer })
-    })
-
-    it("deposit security amount and withdraw", async () => {
-        // deposit 1 ether
-        const amount = web3.utils.toWei("1", "ether")
-        await securityVault.deposit({ from: player0.address, value: amount })
-        // deposit < 1 ether should fail
-        await truffleAssert.reverts(
-            securityVault.deposit({ from: player1.address, value: 1 }),
-            "Deposit amount is incorrect"
-        )
-
-        let balance = await securityVault.deposits(player0.address)
-        assert.equal(balance, amount)
-
-        // withdraw
-        await securityVault.withdraw({ from: player0.address })
-        balance = await securityVault.deposits(player0.address)
-        assert.equal(balance, 0)
+        // deploy contracts
+        testToken = await TestToken.new({ from: deployer })
+        gameWallet = await GameWallet.new(testToken.address, { from: deployer })
+        rpsGame = await RPS_Game.new(gameWallet.address, web3.utils.toWei("1", "ether"), {
+            from: deployer,
+        })
+        // mint TestToken to player0 and player1
+        await testToken.mint({ from: player0.address })
+        await testToken.mint({ from: player1.address })
+        // approve GameWallet to spend TestToken
+        await testToken.approve(gameWallet.address, web3.utils.toWei("1", "ether"), {
+            from: player0.address,
+        })
+        await testToken.approve(gameWallet.address, web3.utils.toWei("1", "ether"), {
+            from: player1.address,
+        })
+        // grants ORGANIZER role to rpsGame
+        await gameWallet.grantRole(await gameWallet.ORGANISER_ROLE(), rpsGame.address, {
+            from: deployer,
+        })
     })
 
     it("players can start a game", async () => {
-        // deposit 1 ether
+        // deposit 1 TestToken to GameWallet
         const amount = web3.utils.toWei("1", "ether")
-        await securityVault.deposit({ from: player0.address, value: amount })
-        await securityVault.deposit({ from: player1.address, value: amount })
+        await gameWallet.deposit(amount, { from: player0.address })
+        await gameWallet.deposit(amount, { from: player1.address })
 
         let validUntil = (await web3.eth.getBlock("latest")).timestamp + 1000
-        let wager = 0
+        let wager = 100
         // calc signature
         // refer: keccak256(abi.encodePacked(_player0Addrs, _player0ProxyAddrs, wager, validUntil))
         // https://ethereum.stackexchange.com/a/126147
@@ -109,10 +103,10 @@ contract("RPS_Game", function () {
 
         const game = await rpsGame.getGame(counter)
         console.log("game: ", { game })
-        // assert.equal(game.PlayerAddrs[0], player0.address)
-        // assert.equal(game.PlayerProxyAddrs[0], player0.address)
-        // assert.equal(game.PlayerAddrs[1], player1.address)
-        // assert.equal(game.PlayerProxyAddrs[1], player1.address)
+        assert.equal(game.PlayerAddrs[0], player0.address)
+        assert.equal(game.PlayerProxyAddrs[0], player0.address)
+        assert.equal(game.PlayerAddrs[1], player1.address)
+        assert.equal(game.PlayerProxyAddrs[1], player1.address)
         assert.equal(game.finalizedAt, 0)
         assert.equal(game.wager, wager)
     })
