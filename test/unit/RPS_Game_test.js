@@ -107,7 +107,7 @@ contract("RPS_Game", function () {
         const counter = await rpsGame.counter()
         assert.equal(counter, 1)
 
-        const game = await rpsGame.games(counter)
+        const game = await rpsGame.getGame(counter)
         console.log("game: ", { game })
         // assert.equal(game.PlayerAddrs[0], player0.address)
         // assert.equal(game.PlayerProxyAddrs[0], player0.address)

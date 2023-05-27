@@ -25,7 +25,7 @@ contract RPS_Game {
     }
 
     mapping(address => Player) public players;
-    mapping(uint => Game) public games;
+    mapping(uint => Game) private games;
 
     uint public counter;
     uint public treasuryBal;
@@ -147,5 +147,9 @@ contract RPS_Game {
         players[loser].losses += 1;
         players[loser].streak = 0;
         players[loser].proxyAddress = address(0);
+    }
+
+    function getGame(uint id) public view returns (Game memory) {
+        return games[id];
     }
 }
