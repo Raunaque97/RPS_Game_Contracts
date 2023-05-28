@@ -69,6 +69,9 @@ contract RPS_Game is Ownable {
     // function timeOutWin() public {
     // }
 
+    // function fraudProofWin() public {
+    // }
+
     /**
         player0 proposes a game by signing a message.
         anyone can call this function to start a game with player0.
