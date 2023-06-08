@@ -3,16 +3,20 @@ pragma solidity >=0.8.0;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@chainlink/contracts/src/v0.8/KeeperCompatible.sol";
+
 import {InitVerifier} from "./verifiers/initVerifier.sol";
 import {MoveAVerifier} from "./verifiers/moveAVerifier.sol";
 import {MoveBVerifier} from "./verifiers/moveBVerifier.sol";
 import {GameWallet} from "./GameWallet.sol";
+import {LeaderBoard} from "./LeaderBoard.sol";
 
-contract RPS_Game is Ownable {
+contract RPS_Game is Ownable, KeeperCompatibleInterface, LeaderBoard {
     GameWallet public gameWallet;
 
     struct Player {
         address proxyAddress;
+        uint gameId; // 0 means not in any game
         uint32 wins;
         uint32 losses;
         uint32 streak;
@@ -36,6 +40,9 @@ contract RPS_Game is Ownable {
 
     uint public counter;
     uint public minWalletBal;
+
+    uint public interval = 1 weeks;
+    uint public lastUpkeepTime;
 
     // EVENTS
     event GameStarted(
@@ -94,6 +101,7 @@ contract RPS_Game is Ownable {
             ECDSA.recover(calculatedHash, signature0) == _player0Addrs,
             "Player0 signature invalid"
         );
+        require(_player0Addrs != msg.sender, "player0 cannot be player1");
         // verify validUntil
         require(validUntil >= block.timestamp, "timeout");
         // verify players have enough security deposit
@@ -110,8 +118,11 @@ contract RPS_Game is Ownable {
 
         players[_player0Addrs].proxyAddress = _player0ProxyAddrs;
         players[msg.sender].proxyAddress = _player1ProxyAddrs;
+
         // create a new game
         counter += 1;
+        players[_player0Addrs].gameId = counter;
+        players[msg.sender].gameId = counter;
         games[counter].startedAt = block.timestamp;
         games[counter].wager = wager;
         games[counter].PlayerAddrs[0] = _player0Addrs;
@@ -135,7 +146,6 @@ contract RPS_Game is Ownable {
     }
 
     function finalizeGame(
-        uint gameId,
         bytes calldata signature,
         // proof values
         uint256[2] calldata a,
@@ -143,13 +153,15 @@ contract RPS_Game is Ownable {
         uint256[2] calldata c,
         uint256[10] calldata input
     ) public {
+        uint gameId = players[msg.sender].gameId;
+        require(gameId > 0, "player not in a game");
         Game storage game = games[gameId];
         // verify game exists
         require(game.startedAt != 0 && game.finalizedAt == 0, "game does not exist");
         // verify proof is valid
         uint step = input[9];
         bytes32 prevStateHash = ECDSA.toEthSignedMessageHash(
-            keccak256(abi.encodePacked(input[1], input[2], input[3], input[4], input[5])) // TODO check if this is the correct way to hash
+            keccak256(abi.encodePacked(input[2], input[3], input[4], input[5])) // TODO check if this is the correct way to hash
         );
         if (step & 1 == 0) {
             require(MoveAVerifier.verifyProof(a, b, c, input), "invalid proof");
@@ -171,7 +183,6 @@ contract RPS_Game is Ownable {
         address winner = game.PlayerAddrs[1];
         address loser = game.PlayerAddrs[0];
         if (input[7] == 0) {
-            // TODO check if this is the correct index
             // player 0 wins
             winner = game.PlayerAddrs[0];
             loser = game.PlayerAddrs[1];
@@ -179,13 +190,14 @@ contract RPS_Game is Ownable {
         players[winner].wins += 1;
         players[winner].streak += 1;
         players[winner].proxyAddress = address(0);
+        updateLeaderBoard(winner, players[winner].wins);
+
         players[loser].losses += 1;
         players[loser].streak = 0;
         players[loser].proxyAddress = address(0);
 
         // grant rewards
         gameWallet.transfer(winner, address(this), game.wager);
-        gameWallet.transferToTreasury(address(this), game.wager);
         // emit event
         emit GameFinalized(
             gameId,
@@ -197,6 +209,36 @@ contract RPS_Game is Ownable {
         );
     }
 
+    function getScore(address player) internal view virtual override returns (uint) {
+        return players[player].wins;
+    }
+
+    function rewardTopPlayers() internal {
+        address[5] memory topPlayers = getLeaderBoard();
+        // half of the treasury goes to the top player
+        uint reward = (gameWallet.deposits(address(this)) >> 1) / 5;
+        for (uint i = 0; i < 5; i++) {
+            if (topPlayers[i] == address(0)) break;
+            gameWallet.transfer(topPlayers[i], address(this), reward);
+        }
+    }
+
+    ////////////////// KEEPERS
+    function checkUpkeep(
+        bytes calldata
+    ) external view override returns (bool upkeepNeeded, bytes memory) {
+        upkeepNeeded = block.timestamp > lastUpkeepTime + interval;
+        return (upkeepNeeded, bytes(""));
+    }
+
+    function performUpkeep(bytes calldata) external override {
+        require(block.timestamp > lastUpkeepTime + interval, "too early");
+        lastUpkeepTime = block.timestamp;
+        rewardTopPlayers();
+    }
+
+    //////////////////////////
+
     function getGame(uint id) public view returns (Game memory) {
         return games[id];
     }
@@ -204,5 +246,9 @@ contract RPS_Game is Ownable {
     //  SETTERS
     function setMinWalletBal(uint _minWalletBal) public onlyOwner {
         minWalletBal = _minWalletBal;
+    }
+
+    function setInterval(uint _interval) public onlyOwner {
+        interval = _interval;
     }
 }
