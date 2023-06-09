@@ -46,6 +46,8 @@ contract RPS_Game is Ownable, KeeperCompatibleInterface, LeaderBoard {
     uint public interval = 1 weeks;
     uint public gameRewardPercent = 500000; // == 50%  between [0, 1000000]
     uint public lastUpkeepTime; // same as when last tournament ended
+    // define a random address
+    address public treasuryAddr = address(bytes20(keccak256("GameTreasuryAddress")));
 
     // EVENTS
     event GameStarted(
@@ -244,11 +246,10 @@ contract RPS_Game is Ownable, KeeperCompatibleInterface, LeaderBoard {
 
         // grant rewards
         // calculate reward using gameRewardPercent
-        gameWallet.transfer(
-            winner,
-            address(this),
-            (game.wager * gameRewardPercent) / 1000000 + game.wager
-        );
+        uint reward = (game.wager * gameRewardPercent) / 1000000;
+        gameWallet.transfer(winner, address(this), game.wager + reward);
+        // send rest to treasuryAddr
+        gameWallet.transfer(treasuryAddr, address(this), game.wager - reward);
 
         // emit event
         emit GameFinalized(
@@ -268,11 +269,11 @@ contract RPS_Game is Ownable, KeeperCompatibleInterface, LeaderBoard {
     function rewardTopPlayers() internal {
         address[5] memory topPlayers = getLeaderBoard(); // can contain address(0)
         // half of the treasury goes to the top player
-        uint reward = (gameWallet.deposits(address(this)) >> 1) / 5;
+        uint reward = (gameWallet.deposits(treasuryAddr) >> 1) / 5;
         for (uint i = 0; i < 5; i++) {
             if (topPlayers[i] == address(0)) continue;
 
-            gameWallet.transfer(topPlayers[i], address(this), reward);
+            gameWallet.transfer(topPlayers[i], treasuryAddr, reward);
             // emit event
             emit TournamentWin(topPlayers[i], block.timestamp, reward);
         }

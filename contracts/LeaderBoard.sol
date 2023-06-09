@@ -37,4 +37,8 @@ abstract contract LeaderBoard {
             i++;
         }
     }
+
+    function startNewLeaderBoard() internal {
+        counter++;
+    }
 }
