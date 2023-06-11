@@ -43,7 +43,8 @@ contract RPS_Game is Ownable, KeeperCompatibleInterface, LeaderBoard {
     uint public counter;
     uint public minWalletBal;
 
-    uint public interval = 1 weeks;
+    uint public interval = 1 weeks; // tournament interval
+    uint public gameDurationBuffer = 1 hours;
     uint public gameRewardPercent = 500000; // == 50%  between [0, 1000000]
     uint public lastUpkeepTime; // same as when last tournament ended
     // define a random address
@@ -73,43 +74,6 @@ contract RPS_Game is Ownable, KeeperCompatibleInterface, LeaderBoard {
         gameWallet = GameWallet(_walletAddrs);
         minWalletBal = _minWalletBal;
         lastUpkeepTime = block.timestamp;
-    }
-
-    // TODO
-    // function forceMove() public {
-    // }
-
-    // function forceMoveReply() public {
-    // }
-
-    // function timeOutWin() public {
-    // }
-
-    // function fraudProofWin() public {
-    // }
-
-    function finalizeAbandonedGame(address _player0Addrs, address _player1Addrs) public onlyOwner {
-        players[_player0Addrs].proxyAddress = address(0);
-        players[_player1Addrs].proxyAddress = address(0);
-
-        uint gameId = players[_player0Addrs].gameId;
-        require(gameId > 0, "invalid game id");
-        require(gameId == players[_player1Addrs].gameId, "invalid game id");
-
-        Game storage game = games[gameId];
-        require(block.timestamp >= game.startedAt + 1 days, "game not Abandoned");
-        require(game.finalizedAt == 0, "game already finalized");
-
-        game.finalizedAt = block.timestamp;
-        // emit event
-        emit GameFinalized(
-            gameId,
-            game.PlayerAddrs[0],
-            game.PlayerAddrs[1],
-            3,
-            game.wager,
-            FinalizeType.Abandoned
-        );
     }
 
     /**
@@ -146,6 +110,24 @@ contract RPS_Game is Ownable, KeeperCompatibleInterface, LeaderBoard {
             "player does not have enough deposit"
         );
         // verify player not already in a game, players proxy addresses should be set to 0x0
+        if (players[_player0Addrs].proxyAddress != address(0)) {
+            // the previous game is not finalized
+            require(
+                games[players[_player0Addrs].gameId].startedAt + gameDurationBuffer <
+                    block.timestamp,
+                "previous game not finalized, wait"
+            );
+            handleAbandonedGame(players[_player0Addrs].gameId);
+        }
+        if (players[msg.sender].proxyAddress != address(0)) {
+            // the previous game is not finalized
+            require(
+                games[players[msg.sender].gameId].startedAt + gameDurationBuffer < block.timestamp,
+                "previous game not finalized, wait"
+            );
+            handleAbandonedGame(players[msg.sender].gameId);
+        }
+
         require(players[_player0Addrs].proxyAddress == address(0), "player0 already in a game");
         require(players[msg.sender].proxyAddress == address(0), "player1 already in a game");
 
@@ -186,6 +168,42 @@ contract RPS_Game is Ownable, KeeperCompatibleInterface, LeaderBoard {
             _player0ProxyAddrs,
             _player1ProxyAddrs,
             wager
+        );
+    }
+
+    // TODO
+    // function forceMove() public {
+    // }
+
+    // function forceMoveReply() public {
+    // }
+
+    // function timeOutWin() public {
+    // }
+
+    // function fraudProofWin() public {
+    // }
+
+    function handleAbandonedGame(uint gameId) internal {
+        Game storage game = games[gameId];
+        game.finalizedAt = block.timestamp;
+        players[game.PlayerAddrs[0]].proxyAddress = address(0);
+        players[game.PlayerAddrs[1]].proxyAddress = address(0);
+        // win streak is reset if the player abandons the game
+        players[game.PlayerAddrs[0]].streak = 0;
+        players[game.PlayerAddrs[1]].streak = 0;
+
+        // as both players didnot gained any reward, trantsfer the wagers to treasury
+        gameWallet.transfer(treasuryAddr, address(this), game.wager >> 1);
+
+        // emit event
+        emit GameFinalized(
+            gameId,
+            game.PlayerAddrs[0],
+            game.PlayerAddrs[1],
+            3, // 3 means abadoned
+            game.wager,
+            FinalizeType.Abandoned
         );
     }
 
@@ -311,5 +329,9 @@ contract RPS_Game is Ownable, KeeperCompatibleInterface, LeaderBoard {
 
     function setGameRewardPercent(uint _gameRewardPercent) public onlyOwner {
         gameRewardPercent = _gameRewardPercent;
+    }
+
+    function setGameDurationBuffer(uint _gameDurationBuffer) public onlyOwner {
+        gameDurationBuffer = _gameDurationBuffer;
     }
 }
